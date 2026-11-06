@@ -32,7 +32,16 @@ decide who gets notified: NodeBB and Shotef do. So:
 It works without Shotef. You then get replies and mentions only.
 
 Forum users are matched to chat users by username, which suits forums that sign
-users in through LDAP. Matching by verified email is also available.
+users in through LDAP. Two fallbacks can be turned on in the ACP, for users whose
+usernames differ:
+
+- **Verified email**: the forum user's confirmed email address.
+- **Display name**: the forum user's full name must equal the full name (first
+  and last) or nickname of exactly one active Mattermost user, ignoring case and
+  spacing. A name that two chat users share, or two forum users share, matches
+  nobody, so no one receives a stranger's notifications. Mattermost only lets the
+  bot see full names while System Console → Site Configuration → Users and Teams →
+  **Show Full Name** is on (the default); without it, only nicknames match.
 
 Before a message is sent, the plugin checks that the recipient can still read the topic.
 If a send fails, it is retried with backoff. The ACP shows a log of recent sends.
@@ -60,7 +69,7 @@ A provider is one file in `lib/providers/` that exports:
 | `id`, `label` | `id` prefixes its settings (`<id>_url`, …) |
 | `fields` | ACP inputs: `{ key, label, type, help, required }` |
 | `verify(cfg)` | Check the credentials, return `{ name }` |
-| `findUser(cfg, { username, email }, strategy)` | The chat user id, or `null` |
+| `findUser(cfg, { username, email, displayname }, strategy)` | The chat user id, or `null`. `strategy` lists `username`, `email`, `displayname` to try in order |
 | `send(cfg, userId, message)` | Deliver it. Throw `RetryableError` or `PermanentError` (`lib/errors.js`) |
 | `reset()` | Drop caches after the settings change |
 

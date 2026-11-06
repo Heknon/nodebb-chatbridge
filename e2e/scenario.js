@@ -12,7 +12,7 @@ const fs = require('fs');
 const { execSync } = require('child_process');
 const assert = require('assert');
 const { chromium } = require('playwright');
-const { Session, dms, sleep, waitFor, NBB, env, WORK } = require('./client');
+const { Session, mm, dms, sleep, waitFor, NBB, env, WORK } = require('./client');
 
 const seed = JSON.parse(fs.readFileSync(`${WORK}/seed.json`, 'utf8'));
 const MM_CONTAINER = 'chatbridge-e2e-mattermost';
@@ -241,6 +241,69 @@ const ctx = {};
 		const a = att(await nextDm('dave.mm', d0));
 		assert.match(a.text, /Now by email too/);
 		await setBridge({ mattermost_match: 'username' });
+	});
+
+	// ------------------------------------------------ display-name fallback
+	// Chat users with real names, and forum users whose usernames don't match
+	// theirs. Created here (idempotently) so the checks run on any stack.
+	const named = {};
+	const ensureNamed = async () => {
+		if (named.ready) return;
+		for (const [username, first_name, last_name] of [['dlevi', 'Dana', 'Levi'], ['ncohen1', 'Noa', 'Cohen'], ['ncohen2', 'Noa', 'Cohen'], ['rkatz', 'Rina', 'Katz']]) {
+			// eslint-disable-next-line no-await-in-loop
+			await mm('POST', '/users', { username, first_name, last_name, email: `${username}@corp.example`, password: PW }, env.ADMIN_TOKEN);
+		}
+		for (const [username, fullname] of [['dana.forum', 'Dana Levi'], ['noa.forum', 'Noa Cohen'], ['rina.a', 'Rina Katz'], ['rina.b', 'Rina Katz']]) {
+			/* eslint-disable no-await-in-loop */
+			// Look up first: NodeBB doesn't refuse a taken username, it creates "dana.forum 0".
+			const found = await S.admin.raw('GET', `/api/user/username/${encodeURIComponent(username)}`);
+			const uid = (found.status === 200 && found.json && found.json.uid)
+				|| (await ok(await S.admin.v3('POST', '/users', { username, password: PW, fullname }), `create ${username}`)).uid;
+			await ok(await S.admin.v3('PUT', `/users/${uid}`, { fullname }), `fullname of ${username}`);
+			S[username] = await new Session().login(username, PW);
+			/* eslint-enable no-await-in-loop */
+		}
+		named.topic = await topic('alice', 'Who is on the rota?', 'x');
+		for (const u of ['dana.forum', 'noa.forum', 'rina.a']) await follow(u, named.topic.tid); // eslint-disable-line no-await-in-loop
+		named.ready = true;
+	};
+	const counts = async users => Object.fromEntries(await Promise.all(users.map(async u => [u, await count(u)])));
+	await check('display name: off unless chosen (match by username only)', async () => {
+		await ensureNamed();
+		const d0 = await count('dlevi');
+		await reply('Bob', named.topic.tid, 'Username matching only');
+		await noDm('dlevi', d0);
+	});
+	await check('display name: the forum full name finds the chat user with that name', async () => {
+		await ensureNamed();
+		await setBridge({ mattermost_match: 'username,displayname' });
+		const d0 = await count('dlevi');
+		await reply('Bob', named.topic.tid, 'Found you by name');
+		const a = att(await nextDm('dlevi', d0));
+		assert.match(a.text, /Found you by name/);
+	});
+	await check('display name: a name two chat users share, or two forum users share, matches nobody', async () => {
+		await ensureNamed();
+		await setBridge({ mattermost_match: 'username,displayname' });
+		const before = await counts(['ncohen1', 'ncohen2', 'rkatz', 'dlevi']);
+		await reply('Bob', named.topic.tid, 'Only Dana should get this');
+		await nextDm('dlevi', before.dlevi);
+		await sleep(2500);
+		const after = await counts(['ncohen1', 'ncohen2', 'rkatz']);
+		assert.deepStrictEqual(after, { ncohen1: before.ncohen1, ncohen2: before.ncohen2, rkatz: before.rkatz });
+	});
+	await check('display name: with Show Full Name off in Mattermost, full names find nobody', async () => {
+		await ensureNamed();
+		await mm('PUT', '/config/patch', { PrivacySettings: { ShowFullName: false } }, env.ADMIN_TOKEN);
+		try {
+			await setBridge({ mattermost_match: 'username,displayname' }); // a save also forgets matched users
+			const d0 = await count('dlevi');
+			await reply('Bob', named.topic.tid, 'Names are hidden now');
+			await noDm('dlevi', d0);
+		} finally {
+			await mm('PUT', '/config/patch', { PrivacySettings: { ShowFullName: true } }, env.ADMIN_TOKEN);
+			await setBridge({ mattermost_match: 'username' });
+		}
 	});
 
 	// --------------------------------------------------------- event toggles

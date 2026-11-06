@@ -5,7 +5,8 @@
 
 const state = {
 	settings: {},
-	users: {}, // uid -> { uid, username, email, email:confirmed, userLang }
+	users: {}, // uid -> { uid, username, email, email:confirmed, fullname, userLang }
+	           // a fullname also needs its `fullname:sorted` entry (see indexFullnames)
 	topics: {}, // tid -> { title, readers?: [uid] }  (no readers = everyone can read)
 	posts: {}, // pid -> { tid, content }
 	hashes: new Map(),
@@ -29,6 +30,11 @@ const db = {
 		const hi = max === '+inf' ? Infinity : max;
 		return [...z(k).entries()].filter(([, s]) => s >= lo && s <= hi)
 			.sort((a, b) => a[1] - b[1]).map(e => e[0]).slice(start, count < 0 ? undefined : start + count);
+	},
+	async getSortedSetRangeByLex(k, min, max) {
+		const above = v => (min[0] === '[' ? v >= min.slice(1) : v > min.slice(1));
+		const below = v => (max[0] === '[' ? v <= max.slice(1) : v < max.slice(1));
+		return [...z(k).keys()].filter(v => above(v) && below(v)).sort();
 	},
 	async listPrepend(k, v) { l(k).unshift(v); },
 	async listTrim(k, start, stop) { state.lists.set(k, l(k).slice(start, stop + 1)); },
@@ -96,6 +102,12 @@ global.nodebb = {
 		if (!(p in modules)) throw new Error(`stub: unexpected nbb('${p}')`);
 		return modules[p];
 	},
+};
+
+// NodeBB's own index of full names: "<lowercased full name>:<uid>".
+state.indexFullnames = function () {
+	state.zsets.delete('fullname:sorted');
+	Object.values(state.users).forEach((u) => { if (u.fullname) z('fullname:sorted').set(`${u.fullname.toLowerCase()}:${u.uid}`, 0); });
 };
 
 state.reset = function () {

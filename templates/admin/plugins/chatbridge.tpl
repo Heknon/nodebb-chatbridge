@@ -55,6 +55,7 @@
 							<option value="{./value}" {{{ if ./selected }}}selected{{{ end }}}>{./label}</option>
 							{{{ end }}}
 						</select>
+						<div class="form-text">Display name: the forum user's full name must equal the full name or nickname of exactly one chat user. Names shared by two people match nobody.</div>
 					</div>
 				</div>
 				<div class="d-flex gap-2 align-items-center mt-2">

@@ -27,10 +27,12 @@ const fake = {
 	async verify() { return { name: 'bot' }; },
 	async findUser(cfg, u, strategy) {
 		fake.lookups += 1;
+		fake.lastLookup = u;
 		if (fake.lookupFailures.length) throw fake.lookupFailures.shift();
 		const directory = { alice: 'ext-alice', bob: 'ext-bob', carol: 'ext-carol' };
 		if (strategy.includes('username') && directory[u.username]) return directory[u.username];
 		if (strategy.includes('email') && u.email === 'dave@corp') return 'ext-dave';
+		if (strategy.includes('displayname') && u.displayname === 'Dana O\'Levi') return 'ext-dana';
 		return null;
 	},
 	async send(cfg, id, message) {
@@ -166,6 +168,37 @@ test('a disabled event, a disabled provider, or a missing token sends nothing', 
 	state.settings.fake_token = '';
 	assert.match((await Relay.handle(reply())).skipped, /no provider/);
 	assert.strictEqual(fake.sent.length, 0);
+});
+
+test('display-name fallback: the forum full name, decoded, reaches the provider', async () => {
+	// NodeBB may hand the full name back HTML-escaped.
+	state.users[8] = { uid: 8, username: 'dana.forum', fullname: 'Dana  O&#x27;Levi' };
+	state.indexFullnames();
+	state.settings.fake_match = 'username,displayname';
+	const data = reply();
+	data.uidsNotified = [8];
+	assert.strictEqual((await Relay.handle(data)).sent, 1);
+	assert.deepStrictEqual(fake.sent.map(s => s.id), ['ext-dana']);
+	assert.strictEqual(fake.lastLookup.displayname, 'Dana O\'Levi');
+});
+
+test('display-name fallback is off unless chosen, and a full name two forum users share is not used', async () => {
+	state.users[8] = { uid: 8, username: 'dana.forum', fullname: 'Dana O&#x27;Levi' };
+	state.indexFullnames();
+	const data = reply();
+	data.uidsNotified = [8];
+	assert.strictEqual((await Relay.handle(data)).unmatched, 1, 'match: username only');
+	assert.strictEqual(fake.lastLookup.displayname, '');
+
+	Identity.clear();
+	state.settings.fake_match = 'username,displayname';
+	Settings.invalidate();
+	state.users[9] = { uid: 9, username: 'dana.other', fullname: 'dana o&#x27;levi' };
+	state.indexFullnames();
+	assert.strictEqual((await Relay.handle(reply({ datetime: Date.now() + 1 }))).sent, 1, 'uid 1 still gets it');
+	data.notification.datetime = Date.now() + 2;
+	assert.strictEqual((await Relay.handle(data)).unmatched, 1, 'shared name');
+	assert.strictEqual(fake.lastLookup.displayname, '');
 });
 
 test('"other" notifications are off by default', async () => {
