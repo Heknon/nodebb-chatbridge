@@ -1,0 +1,24 @@
+{
+  "name": "nodebb-plugin-chatbridge",
+  "version": "0.1.0",
+  "description": "Relay NodeBB notifications (replies, Shotef ticket status changes, mentions) to users' chat DMs. Mattermost first; providers are pluggable.",
+  "main": "library.js",
+  "scripts": {
+    "test": "node --test \"tests/*.test.js\"",
+    "e2e": "e2e/up.sh && node e2e/scenario.js"
+  },
+  "keywords": [
+    "nodebb",
+    "nodebb-plugin",
+    "mattermost",
+    "chat",
+    "notifications"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "nbbpm": {
+    "compatibility": "^3.0.0 || ^4.0.0"
+  }
+}
