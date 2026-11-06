@@ -1,0 +1,16 @@
+{
+  "id": "nodebb-plugin-chatbridge",
+  "url": "https://github.com/Heknon/nodebb-chatbridge",
+  "library": "./library.js",
+  "hooks": [
+    { "hook": "static:app.load", "method": "init" },
+    { "hook": "static:api.routes", "method": "apiRoutes" },
+    { "hook": "filter:admin.header.build", "method": "adminMenu" },
+    { "hook": "action:notification.pushed", "method": "onNotificationPushed" },
+    { "hook": "action:settings.set", "method": "onSettingsSet" }
+  ],
+  "templates": "templates",
+  "modules": {
+    "../admin/plugins/chatbridge.js": "./public/js/admin.js"
+  }
+}

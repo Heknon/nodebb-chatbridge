@@ -51,6 +51,29 @@ If a send fails, it is retried with backoff. The ACP shows a log of recent sends
 - NodeBB 3.x or 4.x, Node.js 20+
 - Mattermost 7+ with bot accounts enabled
 
+## Adding a provider
+
+A provider is one file in `lib/providers/` that exports:
+
+| Member | Purpose |
+| --- | --- |
+| `id`, `label` | `id` prefixes its settings (`<id>_url`, …) |
+| `fields` | ACP inputs: `{ key, label, type, help, required }` |
+| `verify(cfg)` | Check the credentials, return `{ name }` |
+| `findUser(cfg, { username, email }, strategy)` | The chat user id, or `null` |
+| `send(cfg, userId, message)` | Deliver it. Throw `RetryableError` or `PermanentError` (`lib/errors.js`) |
+| `reset()` | Drop caches after the settings change |
+
+`message` is provider-neutral (`lib/message.js`): `summary`, `title`, `url`,
+`excerpt`, `stage`, `color`. Register the provider in `lib/providers/index.js`.
+Another plugin can add one through `filter:chatbridge.providers` instead.
+
+## Development
+
+```bash
+npm test     # unit tests: stubbed NodeBB, fake Mattermost server
+```
+
 ## Status
 
 In development. See [PLAN.md](./PLAN.md) for the design.
