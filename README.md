@@ -71,7 +71,8 @@ Another plugin can add one through `filter:chatbridge.providers` instead.
 ## Development
 
 ```bash
-npm test     # unit tests: stubbed NodeBB, fake Mattermost server
+npm test       # unit tests: stubbed NodeBB, fake Mattermost server
+npm run e2e    # real NodeBB + Mattermost in Docker; see e2e/README.md
 ```
 
 ## Status
