@@ -22,10 +22,12 @@ const fake = {
 	fields: [{ key: 'token', label: 'Token', required: true }],
 	sent: [],
 	failures: [], // errors to throw on the next sends, in order
+	lookupFailures: [], // errors to throw on the next lookups, in order
 	lookups: 0,
 	async verify() { return { name: 'bot' }; },
 	async findUser(cfg, u, strategy) {
 		fake.lookups += 1;
+		if (fake.lookupFailures.length) throw fake.lookupFailures.shift();
 		const directory = { alice: 'ext-alice', bob: 'ext-bob', carol: 'ext-carol' };
 		if (strategy.includes('username') && directory[u.username]) return directory[u.username];
 		if (strategy.includes('email') && u.email === 'dave@corp') return 'ext-dave';
@@ -63,6 +65,7 @@ test.beforeEach(() => {
 	Relay.clearDedupe();
 	fake.sent.length = 0;
 	fake.failures.length = 0;
+	fake.lookupFailures.length = 0;
 	fake.lookups = 0;
 	state.settings = { fake_enabled: 'on', fake_token: 't', fake_match: 'username' };
 	state.users = {
@@ -215,6 +218,74 @@ test('retries stop after MAX_ATTEMPTS', async () => {
 	assert.strictEqual(await Outbox.pending(), 0);
 	assert.strictEqual((await Outbox.recent(1))[0].outcome, 'failed');
 	assert.strictEqual(fake.sent.length, 0);
+});
+
+test('chat down during the user lookup: queued, then looked up and sent by the drain', async () => {
+	// e.g. right after a restart, when no identity is cached yet
+	fake.lookupFailures.push(new RetryableError('Mattermost unreachable'));
+	const r = await Relay.handle(reply());
+	assert.strictEqual(r.retrying, 1);
+	assert.strictEqual(await Outbox.pending(), 1);
+	assert.strictEqual(await Outbox.drain(Date.now() + Outbox.BASE_DELAY_MS + 1), 1);
+	assert.deepStrictEqual(fake.sent.map(s => s.id), ['ext-alice']);
+	const log = (await Outbox.recent(5)).map(e => `${e.outcome}#${e.attempts}`);
+	assert.deepStrictEqual(log, ['sent#2', 'retrying#1']);
+});
+
+test('a lookup refused by chat (bad token) is logged as failed', async () => {
+	fake.lookupFailures.push(new PermanentError('Mattermost GET /users/username/alice → 401'));
+	const r = await Relay.handle(reply());
+	assert.strictEqual(r.failed, 1);
+	assert.strictEqual(await Outbox.pending(), 0);
+	const [entry] = await Outbox.recent(1);
+	assert.strictEqual(entry.outcome, 'failed');
+	assert.match(entry.error, /401/);
+});
+
+test('a queued lookup that finds no chat user ends as unmatched', async () => {
+	const data = reply();
+	data.uidsNotified = [5]; // "nobody": no chat account
+	fake.lookupFailures.push(new RetryableError('down'));
+	await Relay.handle(data);
+	await Outbox.drain(Date.now() + Outbox.BASE_DELAY_MS + 1);
+	assert.strictEqual(await Outbox.pending(), 0);
+	assert.strictEqual(fake.sent.length, 0);
+	assert.strictEqual((await Outbox.recent(1))[0].outcome, 'unmatched');
+});
+
+test('a Shotef reminder names its ticket, whatever its id looks like', async () => {
+	// The reminder id is a UUID: one that starts with digits is not a topic.
+	state.topics[117] = { title: 'Unrelated', readers: [] };
+	const r = await Relay.handle({
+		notification: {
+			type: 'shotef', nid: 'shotef:reminder:117aa971-98eb-4bf8-8b6b-2bc0db4466b1', datetime: Date.now(),
+			bodyShort: 'Reminder: re-check this ticket', path: '/shotef?team=sup&card=10', from: 0,
+		},
+		uidsNotified: [1],
+	});
+	assert.strictEqual(r.sent, 1, JSON.stringify(r));
+	assert.strictEqual(fake.sent[0].message.title, 'Printer on fire');
+	assert.strictEqual(fake.sent[0].message.url, 'https://forum.example.com/shotef?team=sup&card=10');
+});
+
+test('a Shotef shift notice for team "10" carries no topic title', async () => {
+	await Relay.handle({
+		notification: {
+			type: 'shotef', nid: 'shotef:handover:10:3', datetime: Date.now(),
+			bodyShort: 'You are now the on-duty shotef', path: '/shotef?team=10', from: 2,
+		},
+		uidsNotified: [1],
+	});
+	assert.strictEqual(fake.sent.length, 1);
+	assert.strictEqual(fake.sent[0].message.title, '');
+});
+
+test('saving the plugin settings forgets matched chat users', async () => {
+	const library = require('../library');
+	await Relay.handle(reply());
+	library.onSettingsSet({ plugin: 'chatbridge' });
+	await Relay.handle(reply({ datetime: Date.now() + 1 }));
+	assert.strictEqual(fake.lookups, 2, 'looked up again after the save');
 });
 
 test('backoff doubles, is capped, and honours the provider\'s wait', () => {

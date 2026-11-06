@@ -30,6 +30,47 @@ test('refs: fields win, then path, then Shotef nid', () => {
 	assert.deepStrictEqual(Events.refs({ tid: 'abc', path: '' }), { tid: 0, pid: 0 });
 });
 
+test('refs: Shotef notices take the ticket from card=, never a team or reminder id', () => {
+	// The ticket-specific notices link to the card.
+	assert.deepStrictEqual(Events.refs({ nid: 'shotef:assign:42:7', path: '/shotef?team=sup&card=42' }), { tid: 42, pid: 0 });
+	// Reminder ids are UUIDs; one starting with digits is not a topic id.
+	assert.deepStrictEqual(Events.refs({ nid: 'shotef:reminder:117aa971-98eb-4bf8-8b6b-2bc0db4466b1', path: '/shotef?team=sup&card=17' }), { tid: 17, pid: 0 });
+	assert.deepStrictEqual(Events.refs({ nid: 'shotef:reminder:71608b1d-098d-4182-b56a-29f2ba05072c', path: '/shotef' }), { tid: 0, pid: 0 });
+	// Shift notices are about a team, whose id may be numeric.
+	assert.deepStrictEqual(Events.refs({ nid: 'shotef:handover:1:9', path: '/shotef?team=1' }), { tid: 0, pid: 0 });
+	assert.deepStrictEqual(Events.refs({ nid: 'shotef:vacant:42:2026-11-06', path: '/shotef?team=42' }), { tid: 0, pid: 0 });
+	// Ticket nids still work without a path.
+	assert.deepStrictEqual(Events.refs({ nid: 'shotef:help:42' }), { tid: 42, pid: 0 });
+	assert.deepStrictEqual(Events.refs({ nid: 'shotef:pass:42:support' }), { tid: 42, pid: 0 });
+});
+
+test('inline tags do not split words; block tags do', () => {
+	// NodeBB renders a mention as @<bdi>Bob</bdi> inside a link.
+	const mention = '<p dir="auto">Hey <a class="plugin-mentions-user" href="/user/bob">@<bdi>Bob</bdi></a> can you look?</p>';
+	assert.strictEqual(Message.excerpt(mention, 300), 'Hey @Bob can you look?');
+	assert.strictEqual(Message.excerpt('<p>Try <a href="https://x">the guide</a>?</p><p>Next</p>', 300), 'Try the guide? Next');
+	assert.strictEqual(Message.plain('Line one<br>line <em>two</em>'), 'Line one line two');
+});
+
+test('htmlToMarkdownLine escapes forum text, so a title cannot add links or emphasis', () => {
+	const md = Message.htmlToMarkdownLine('<strong>j_doe</strong> posted in <strong>[Reset](https://evil.example) *now* `x` #1 a|b</strong>');
+	assert.strictEqual(md, '**j\\_doe** posted in **\\[Reset\\](https://evil.example) \\*now\\* \\`x\\` \\#1 a\\|b**');
+	assert.strictEqual(Message.markdownToPlain(md), 'j_doe posted in [Reset](https://evil.example) *now* `x` #1 a|b');
+	assert.strictEqual(Message.htmlToMarkdownLine('a &lt;b&gt; c'), 'a \\<b\\> c');
+	// URLs are autolinked as they are: escaping inside one would change it.
+	assert.strictEqual(
+		Message.escapeMarkdown('see https://example.com/a_b/c*d?x=1_2, www.example.org/x_y and a_b'),
+		'see https://example.com/a_b/c*d?x=1_2, www.example.org/x_y and a\\_b',
+	);
+	// ...but a URL can't carry link syntax past the escaping.
+	assert.strictEqual(Message.escapeMarkdown('https://a.example/[x](https://evil.example)'), 'https://a.example/\\[x\\](https://evil.example)');
+	const withUrl = Message.htmlToMarkdownLine('<strong>bob</strong> in <strong>See https://x.example/a_b</strong>');
+	assert.strictEqual(withUrl, '**bob** in **See https://x.example/a_b**');
+	assert.strictEqual(Message.markdownToPlain(withUrl), 'bob in See https://x.example/a_b');
+	// A summary that falls back to the title is escaped too.
+	assert.strictEqual(Message.compose({ event: 'other', bodyHtml: '', title: '**x**', baseUrl: 'https://f', path: '/' }).summary, '\\*\\*x\\*\\*');
+});
+
 test('htmlToMarkdownLine keeps bold, drops tags, decodes entities', () => {
 	assert.strictEqual(
 		Message.htmlToMarkdownLine('<strong>alice</strong> has posted a reply to: <strong>Can&#x27;t sign in &amp; &quot;reset&quot;</strong>'),

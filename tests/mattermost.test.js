@@ -117,13 +117,30 @@ test('send opens the DM once, then posts an attachment', async () => {
 	const post = mm.posts[0];
 	assert.strictEqual(post.channel_id, 'dm-bot1-u-alice');
 	assert.deepStrictEqual(post.props.attachments[0], {
-		fallback: '**bob** has posted a reply to: **VPN down** https://forum/post/9',
+		fallback: 'bob has posted a reply to: VPN down https://forum/post/9',
 		color: '#1e88e5',
 		pretext: '**bob** has posted a reply to: **VPN down**',
 		title: 'VPN down',
 		title_link: 'https://forum/post/9',
 		text: '> Try reconnecting',
 	});
+});
+
+test('render escapes forum text in markdown fields; the fallback is plain', () => {
+	const { escapeMarkdown, htmlToMarkdownLine } = require('../lib/message');
+	const evil = '[Reset your password](https://evil.example) **now**';
+	const a = Mattermost.render({
+		summary: htmlToMarkdownLine(`<strong>bob</strong> posted a reply in <strong>${evil}</strong>`),
+		title: evil,
+		url: 'https://forum/post/9',
+		excerpt: 'see [this](https://evil.example)\n# not a heading',
+	}, 'ch').props.attachments[0];
+	const esc = escapeMarkdown(evil);
+	assert.strictEqual(esc, '\\[Reset your password\\](https://evil.example) \\*\\*now\\*\\*');
+	assert.strictEqual(a.pretext, `**bob** posted a reply in **${esc}**`);
+	assert.strictEqual(a.title, esc);
+	assert.strictEqual(a.text, '> see \\[this\\](https://evil.example)\n> \\# not a heading');
+	assert.strictEqual(a.fallback, `bob posted a reply in ${evil} https://forum/post/9`);
 });
 
 test('429 is retryable and carries the wait', async () => {

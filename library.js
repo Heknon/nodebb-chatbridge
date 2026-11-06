@@ -12,6 +12,7 @@ const relay = require('./lib/relay');
 const outbox = require('./lib/outbox');
 const settings = require('./lib/settings');
 const providers = require('./lib/providers');
+const identity = require('./lib/identity');
 
 const plugin = module.exports;
 
@@ -46,5 +47,7 @@ plugin.onSettingsSet = function (data) {
 	if (data && data.plugin === settings.HASH) {
 		settings.invalidate();
 		providers.resetAll();
+		// Chat user ids belong to one server; a new URL or match rule makes them stale.
+		identity.clear();
 	}
 };

@@ -28,23 +28,25 @@ define('admin/plugins/chatbridge', [], function () {
 			.text(text);
 	}
 
-	var OUTCOME_CLASS = { sent: 'text-bg-success', retrying: 'text-bg-warning', failed: 'text-bg-danger', dropped: 'text-bg-secondary' };
+	var OUTCOME_CLASS = { sent: 'text-bg-success', retrying: 'text-bg-warning', failed: 'text-bg-danger', dropped: 'text-bg-secondary', unmatched: 'text-bg-secondary' };
 
 	function loadLog() {
 		call('GET', '/log').then(function (r) {
 			var rows = (r.entries || []).map(function (e) {
 				var topic = e.url ? '<a href="' + esc(e.url) + '" target="_blank" rel="noopener">' + esc(e.title || e.url) + '</a>' : esc(e.title);
+				// The reason goes under the topic: a column of its own is squeezed
+				// off the side of the ACP's narrow card.
+				var error = e.error ? '<div class="small text-danger text-break">' + esc(e.error) + '</div>' : '';
 				return '<tr><td class="text-nowrap">' + esc(new Date(e.at).toLocaleString()) + '</td>' +
 					'<td><span class="badge ' + (OUTCOME_CLASS[e.outcome] || 'text-bg-light') + '">' + esc(e.outcome) + '</span></td>' +
 					'<td>' + esc(e.provider) + '</td>' +
 					'<td><a href="' + config.relative_path + '/uid/' + esc(e.uid) + '">' + esc(e.uid) + '</a></td>' +
-					'<td>' + esc(e.event) + '</td><td>' + topic + '</td>' +
-					'<td class="small text-danger">' + esc(e.error) + '</td></tr>';
+					'<td>' + esc(e.event) + '</td><td>' + topic + error + '</td></tr>';
 			});
-			$('#chatbridge-log').html(rows.length ? rows.join('') : '<tr><td colspan="7" class="text-muted">Nothing sent yet.</td></tr>');
+			$('#chatbridge-log').html(rows.length ? rows.join('') : '<tr><td colspan="6" class="text-muted">Nothing sent yet.</td></tr>');
 			$('#chatbridge-pending').text(r.pending ? r.pending + ' message(s) waiting to be retried.' : '');
 		}).catch(function () {
-			$('#chatbridge-log').html('<tr><td colspan="7" class="text-danger">Could not load the log.</td></tr>');
+			$('#chatbridge-log').html('<tr><td colspan="6" class="text-danger">Could not load the log.</td></tr>');
 		});
 	}
 

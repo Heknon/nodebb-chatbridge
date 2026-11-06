@@ -76,8 +76,8 @@
 			<p class="small text-muted mb-2" id="chatbridge-pending"></p>
 			<div class="table-responsive">
 				<table class="table table-sm align-middle mb-0">
-					<thead><tr><th>When</th><th>Result</th><th>Provider</th><th>User</th><th>Event</th><th>Topic</th><th>Error</th></tr></thead>
-					<tbody id="chatbridge-log"><tr><td colspan="7" class="text-muted">Loading…</td></tr></tbody>
+					<thead><tr><th>When</th><th>Result</th><th>Provider</th><th>User</th><th>Event</th><th>Topic</th></tr></thead>
+					<tbody id="chatbridge-log"><tr><td colspan="6" class="text-muted">Loading…</td></tr></tbody>
 				</table>
 			</div>
 		</div>
