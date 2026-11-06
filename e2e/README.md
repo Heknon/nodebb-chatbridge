@@ -33,6 +33,9 @@ the users' DM channels with the bot).
 - **The user's NodeBB settings**: `none` sends nothing; `email` still sends.
 - **Matching**: unmatched, deactivated, and email-only users; "username, then
   verified email".
+- **Display name**: off unless chosen; a forum full name finds the chat user with
+  that name; a name two chat users share, or two forum users share, matches
+  nobody; with Mattermost's Show Full Name off, full names find nobody.
 - **Event toggles**, **language** (Hebrew), **base URL**, **excerpt length**.
 - **Markdown**: a topic title can't put links or emphasis into the bot's
   message.

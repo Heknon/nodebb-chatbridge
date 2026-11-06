@@ -73,6 +73,11 @@ the NodeBB username is the Mattermost username.
 - **Default: match by username.** Mattermost `GET /api/v4/users/username/{name}`
   (lowercased). Deactivated accounts count as no match.
 - **Optional: verified email**, as a fallback or instead (`<provider>_match`).
+- **Optional: display name**, as a last fallback. The NodeBB full name must equal
+  the full name or nickname of exactly one active Mattermost user
+  (`POST /api/v4/users/search`, then an exact comparison). Names are not unique, so
+  a name shared by two chat users, or by two forum users (`fullname:sorted`),
+  matches nobody.
 - Results are cached in memory per process: a match for 6h, no match for 15 min.
 - There is no opt-in step and no account page. Everyone who gets the NodeBB
   notification gets the DM. To opt out, a user turns that type off in NodeBB's
@@ -104,7 +109,7 @@ The provider interface is kept small, so Slack, Teams or Telegram can be added l
 ```js
 { id, label, fields, defaultMatch,
   verify(cfg) → { name },
-  findUser(cfg, { username, email }, strategy) → externalId | null,
+  findUser(cfg, { username, email, displayname }, strategy) → externalId | null,
   send(cfg, externalId, message) → void   // throws RetryableError | PermanentError
   reset() }
 ```

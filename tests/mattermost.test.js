@@ -17,7 +17,17 @@ function fakeMattermost() {
 			bot: { id: 'bot1', username: 'chatbridge', is_bot: true, delete_at: 0 },
 			alice: { id: 'u-alice', username: 'alice', email: 'alice@corp.example', delete_at: 0 },
 			gone: { id: 'u-gone', username: 'gone', email: 'gone@corp.example', delete_at: 1700000000000 },
+			// For display-name matching:
+			dlevi: { id: 'u-dlevi', username: 'dlevi', first_name: 'Dana', last_name: 'Levi', delete_at: 0 },
+			danielle: { id: 'u-danielle', username: 'danielle', first_name: 'Danielle', last_name: 'Levinson', delete_at: 0 },
+			ncohen1: { id: 'u-ncohen1', username: 'ncohen1', first_name: 'Noa', last_name: 'Cohen', delete_at: 0 },
+			ncohen2: { id: 'u-ncohen2', username: 'ncohen2', first_name: 'Noa', last_name: 'Cohen', delete_at: 0 },
+			yossi: { id: 'u-yossi', username: 'yossi', first_name: '', last_name: '', nickname: 'Yossi the Admin', delete_at: 0 },
+			rkatz: { id: 'u-rkatz', username: 'rkatz', first_name: 'Rina', last_name: 'Katz', delete_at: 0 },
+			rkatzold: { id: 'u-rkatzold', username: 'rkatzold', first_name: 'Rina', last_name: 'Katz', delete_at: 1700000000000 },
+			rinabot: { id: 'u-rinabot', username: 'rinabot', nickname: 'Rina Katz', is_bot: true, delete_at: 0 },
 		},
+		hideNames: false, // Mattermost's Privacy > Show Full Name off: the bot sees no first/last names
 		requests: [],
 		posts: [],
 		channels: 0,
@@ -45,6 +55,15 @@ function fakeMattermost() {
 			if (req.method === 'GET' && (m = /^\/api\/v4\/users\/email\/(.+)$/.exec(req.url))) {
 				const u = byName.find(x => x.email === decodeURIComponent(m[1]));
 				return u ? send(200, u) : send(404, { message: 'not found' });
+			}
+			// Like Mattermost: every word of the term must start a word of one of the fields.
+			if (req.method === 'POST' && req.url === '/api/v4/users/search') {
+				const words = String(body.term || '').toLowerCase().split(/\s+/).filter(Boolean);
+				const shown = u => (mm.hideNames ? { ...u, first_name: '', last_name: '' } : u);
+				const fieldWords = u => [u.username, u.first_name, u.last_name, u.nickname].join(' ').toLowerCase().split(/\s+/);
+				return send(200, byName.map(shown).filter(u => (body.allow_inactive || !(u.delete_at > 0))
+					&& words.every(w => fieldWords(u).some(f => f.startsWith(w))))
+					.slice(0, body.limit || 100));
 			}
 			if (req.method === 'POST' && req.url === '/api/v4/channels/direct') {
 				mm.channels += 1;
@@ -102,6 +121,39 @@ test('findUser falls back to email only when asked to', async () => {
 	assert.strictEqual(await Mattermost.findUser(cfg, who, 'username'), null);
 	assert.strictEqual(await Mattermost.findUser(cfg, who, 'username,email'), 'u-alice');
 	assert.strictEqual(await Mattermost.findUser(cfg, { username: 'alice', email: '' }, 'email'), null);
+});
+
+test('findUser by display name: full name or nickname, ignoring case and spacing', async () => {
+	const by = displayname => Mattermost.findUser(cfg, { username: 'not.in.chat', displayname }, 'username,displayname');
+	assert.strictEqual(await by('  dana   LEVI '), 'u-dlevi');
+	assert.strictEqual(await by('Yossi the Admin'), 'u-yossi');
+	// The search matches prefixes ("Dan Lev" finds Danielle Levinson too); the name must match exactly.
+	assert.strictEqual(await by('Dan Lev'), null);
+	const search = mm.requests.find(r => r.url === '/api/v4/users/search');
+	assert.deepStrictEqual(search.body, { term: 'dana levi', allow_inactive: false, limit: 100 });
+});
+
+test('a display name two chat users share matches nobody; bots and deactivated users do not count', async () => {
+	const by = displayname => Mattermost.findUser(cfg, { displayname }, 'displayname');
+	assert.strictEqual(await by('Noa Cohen'), null);
+	assert.strictEqual(await by('Rina Katz'), 'u-rkatz');
+});
+
+test('display name is tried only when the strategy asks, and after the username', async () => {
+	assert.strictEqual(await Mattermost.findUser(cfg, { username: 'nobody', displayname: 'Dana Levi' }, 'username'), null);
+	assert.ok(!mm.requests.some(r => r.url === '/api/v4/users/search'), 'no name search');
+	assert.strictEqual(await Mattermost.findUser(cfg, { username: 'alice', displayname: 'Dana Levi' }, 'username,displayname'), 'u-alice');
+	assert.strictEqual(await Mattermost.findUser(cfg, { username: 'alice' }, 'username,displayname'), 'u-alice');
+});
+
+test('with full names hidden from the bot (Show Full Name off), only nicknames match', async () => {
+	mm.hideNames = true;
+	try {
+		assert.strictEqual(await Mattermost.findUser(cfg, { displayname: 'Dana Levi' }, 'displayname'), null);
+		assert.strictEqual(await Mattermost.findUser(cfg, { displayname: 'Yossi the Admin' }, 'displayname'), 'u-yossi');
+	} finally {
+		mm.hideNames = false;
+	}
 });
 
 test('send opens the DM once, then posts an attachment', async () => {
