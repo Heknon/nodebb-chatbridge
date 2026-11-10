@@ -82,13 +82,13 @@ async function mmUserId(username) {
 	return mmIds[username];
 }
 
-// Posts the bot has sent to a Mattermost user, oldest first.
-async function dms(username) {
+// Posts the bot (or `from`, e.g. the webhook's owner) has sent to a Mattermost user, oldest first.
+async function dms(username, from = env.BOT_ID) {
 	const uid = await mmUserId(username);
-	const ch = await mm('POST', '/channels/direct', [env.BOT_ID, uid], env.ADMIN_TOKEN);
+	const ch = await mm('POST', '/channels/direct', [from, uid], env.ADMIN_TOKEN);
 	const posts = await mm('GET', `/channels/${ch.json.id}/posts?per_page=200`, undefined, env.ADMIN_TOKEN);
 	const p = posts.json;
-	return (p.order || []).map(id => p.posts[id]).filter(x => x.user_id === env.BOT_ID).sort((a, b) => a.create_at - b.create_at);
+	return (p.order || []).map(id => p.posts[id]).filter(x => x.user_id === from && (from !== env.ADMIN_ID || (x.props || {}).from_webhook === 'true')).sort((a, b) => a.create_at - b.create_at);
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));

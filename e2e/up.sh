@@ -45,6 +45,19 @@ if [ ! -s "$WORK/mm.env" ]; then
 	printf 'ADMIN_TOKEN=%s\nBOT_ID=%s\nBOT_TOKEN=%s\nTEAM=%s\n' "$TOKEN" "$BOT" "$BOT_TOKEN" "$TEAM" > "$WORK/mm.env"
 fi
 
+# An incoming webhook (the token-less provider). Created by mmadmin, so its
+# "@username" posts land in the DM between mmadmin and that user.
+if ! grep -q '^HOOK_ID=' "$WORK/mm.env"; then
+	. "$WORK/mm.env"
+	MM=http://localhost:8065/api/v4
+	j() { curl -sS -H 'Content-Type: application/json' -H "Authorization: Bearer $ADMIN_TOKEN" "$@"; }
+	j -X PUT $MM/config/patch -d '{"ServiceSettings":{"EnableIncomingWebhooks":true}}' >/dev/null
+	CH=$(j $MM/teams/$TEAM/channels/name/town-square | jq -r .id)
+	HOOK_ID=$(j -X POST $MM/hooks/incoming -d "{\"channel_id\":\"$CH\",\"display_name\":\"Forum\",\"channel_locked\":false}" | jq -r .id)
+	ADMIN_ID=$(j $MM/users/me | jq -r .id)
+	printf 'HOOK_ID=%s\nADMIN_ID=%s\n' "$HOOK_ID" "$ADMIN_ID" >> "$WORK/mm.env"
+fi
+
 # -------------------------------------------------------------------- NodeBB
 if ! running $P-nodebb; then
 	MOUNTS=(-v "$PLUGIN:/usr/src/app/node_modules/nodebb-plugin-chatbridge:ro")

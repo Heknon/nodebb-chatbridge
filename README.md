@@ -46,7 +46,44 @@ usernames differ:
 Before a message is sent, the plugin checks that the recipient can still read the topic.
 If a send fails, it is retried with backoff. The ACP shows a log of recent sends.
 
-## Mattermost setup
+## Webhook setup (no token)
+
+The **Webhook** provider sends each message as one `POST` to a URL you give it.
+It needs no bot or token, and it doesn't look anyone up: the recipient is the
+forum username.
+
+1. In Mattermost, Integrations → Incoming Webhooks → Add: pick any channel and
+   leave **Lock to this channel** off (otherwise `@username` DMs are refused).
+   Copy the URL. (System Console → Integrations → Integration Management →
+   **Enable Incoming Webhooks** must be on.)
+2. In NodeBB, ACP → Plugins → Chat Bridge → Webhook: enable it, paste the URL,
+   save, then **Send me a test message**.
+
+Headers default to `Content-Type: application/json` (one `Name: value` per
+line, or a JSON object). The body is a JSON template; the default sends a DM:
+
+```json
+{"channel": "@{{username}}", "text": "{{text}}"}
+```
+
+| Placeholder | Value |
+| --- | --- |
+| `{{username}}` | Forum username, lowercased |
+| `{{text}}` | The whole message as markdown: summary, link to the post, quoted excerpt |
+| `{{summary}}` | The one-line summary, markdown |
+| `{{plain}}` | The summary as plain text, then the link |
+| `{{title}}`, `{{url}}`, `{{excerpt}}` | Topic title, link, reply excerpt (plain text) |
+| `{{event}}`, `{{stage}}`, `{{color}}` | Event key, Shotef stage, hex accent |
+
+Placeholders are filled in after the template is parsed, inside its strings,
+so quotes or newlines in forum text can't break the JSON. Any JSON shape works,
+for example a Mattermost attachment, or another chat's webhook format.
+
+In Mattermost, the DMs come from the account that created the webhook (with
+its webhook name). A username with no chat account gets a 400, logged as
+failed; 5xx, 429 and network errors are retried.
+
+## Mattermost bot setup
 
 1. In Mattermost, System Console → Integrations → Bot Accounts: create a bot
    and copy its access token.
@@ -67,7 +104,8 @@ A provider is one file in `lib/providers/` that exports:
 | Member | Purpose |
 | --- | --- |
 | `id`, `label` | `id` prefixes its settings (`<id>_url`, …) |
-| `fields` | ACP inputs: `{ key, label, type, help, required }` |
+| `fields` | ACP inputs: `{ key, label, type, help, required, default }`; `type` is `text`, `password`, `url` or `textarea` |
+| `lookup` | Optional. `false` hides "Match forum users by" (the provider maps the username itself) |
 | `verify(cfg)` | Check the credentials, return `{ name }` |
 | `findUser(cfg, { username, email, displayname }, strategy)` | The chat user id, or `null`. `strategy` lists `username`, `email`, `displayname` to try in order |
 | `send(cfg, userId, message)` | Deliver it. Throw `RetryableError` or `PermanentError` (`lib/errors.js`) |

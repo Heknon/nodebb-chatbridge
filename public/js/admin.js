@@ -66,7 +66,8 @@ define('admin/plugins/chatbridge', [], function () {
 				var p = $(this).attr('data-provider');
 				showResult(p, true, 'Checking…');
 				call('POST', '/providers/' + encodeURIComponent(p) + '/verify').then(function (r) {
-					if (r.ok) showResult(p, true, 'Connected as ' + r.name + (r.isBot ? ' (bot)' : ' (not a bot account)'));
+					if (r.ok && r.message) showResult(p, true, r.message);
+					else if (r.ok) showResult(p, true, 'Connected as ' + r.name + (r.isBot ? ' (bot)' : ' (not a bot account)'));
 					else showResult(p, false, r.error);
 				}).catch(function () { showResult(p, false, 'Request failed.'); });
 			});
