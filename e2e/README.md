@@ -45,7 +45,9 @@ the users' DM channels with the bot).
 - **Admin API**: refuses non-admins, guests, and requests without a CSRF token.
 - **Webhook** (no token): a Mattermost incoming webhook DMs `@username`; the
   ACP card and its buttons; markdown text; a custom body template; a user with
-  no chat account is logged as failed.
+  no chat account is logged as failed; `{{email|localpart}}` and
+  `{{user.<field>}}` reach a chat user whose name isn't the forum username, and
+  users without that value get nothing.
 - **Failures**: a bad token (logged as failed), Mattermost down (queued, then
   delivered by the retry drain), the provider disabled while a retry waits
   (dropped), and Mattermost down right after a NodeBB restart, before any user

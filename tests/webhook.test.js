@@ -112,7 +112,7 @@ test('a custom template: any placeholder, nested values, custom headers', async 
 			username: 'Forum',
 			text: '{{summary}}',
 			attachments: [{ fallback: '{{plain}}', color: '{{color}}', title: '{{title}}', title_link: '{{url}}', text: '{{excerpt}}' }],
-			props: { event: '{{event}}', stage: '{{stage}}', keep: '{{unknown}}', n: 3, on: true, none: null },
+			props: { event: '{{event}}', stage: '{{stage}}', n: 3, on: true, none: null },
 		}),
 	}, 'bob', message);
 	const r = hook.requests[0];
@@ -128,7 +128,7 @@ test('a custom template: any placeholder, nested values, custom headers', async 
 			title_link: 'https://forum/post/9',
 			text: message.excerpt,
 		}],
-		props: { event: 'reply', stage: '', keep: '{{unknown}}', n: 3, on: true, none: null },
+		props: { event: 'reply', stage: '', n: 3, on: true, none: null },
 	});
 });
 
@@ -137,9 +137,56 @@ test('Content-Type defaults to JSON when the headers leave it out', async () => 
 	assert.strictEqual(hook.requests[0].headers['content-type'], 'application/json');
 });
 
-test('findUser is the forum username, lowercased; nobody without one', async () => {
-	assert.strictEqual(await Webhook.findUser(cfg, { username: 'Bob' }, 'username'), 'bob');
+const forumUser = {
+	uid: 7, username: 'Bob', userslug: 'bob', email: 'Bob.Smith@Corp.example', fullname: 'Bob Smith', displayname: 'Bob Smith',
+	fields: { mattermost: 'bsmith', empty: '' },
+};
+
+test('findUser: the recipient is the forum user\'s own fields; nobody without a username', async () => {
+	assert.deepStrictEqual(await Webhook.findUser(cfg, forumUser, 'username'), {
+		uid: '7', username: 'bob', userslug: 'bob', email: 'Bob.Smith@Corp.example', fullname: 'Bob Smith', displayname: 'Bob Smith',
+		fields: { mattermost: 'bsmith', empty: '' },
+	});
 	assert.strictEqual(await Webhook.findUser(cfg, { username: '' }, 'username'), null);
+});
+
+test('recipient placeholders: uid, slug, email, names, user fields, filters', async () => {
+	const body = JSON.stringify({
+		a: '@{{username}}', b: '{{uid}}', c: '{{userslug}}', d: '{{email}}', e: '{{ email | localpart | lower }}', f: '{{email|domain}}',
+		g: '{{fullname|upper}}', h: '{{displayname}}', i: '@{{user.mattermost}}', j: '{{ user.mattermost | upper }}', k: '{{text|trim}}',
+	});
+	const c = { ...cfg, body };
+	assert.strictEqual(Webhook.configured(c), '');
+	assert.deepStrictEqual(Webhook.userFields(c), { displayname: true, fields: ['mattermost'] });
+	await Webhook.send(c, await Webhook.findUser(c, forumUser), message);
+	assert.deepStrictEqual(hook.requests[0].body, {
+		a: '@bob', b: '7', c: 'bob', d: 'Bob.Smith@Corp.example', e: 'bob.smith', f: 'Corp.example',
+		g: 'BOB SMITH', h: 'Bob Smith', i: '@bsmith', j: 'BSMITH', k: Webhook.text(message),
+	});
+});
+
+test('a user missing a recipient value the template uses is unmatched', async () => {
+	const by = (body, fu = forumUser) => Webhook.findUser({ ...cfg, body: JSON.stringify(body) }, fu);
+	assert.strictEqual(await by({ channel: '@{{email|localpart}}' }, { ...forumUser, email: '' }), null, 'no confirmed email');
+	assert.strictEqual(await by({ channel: '@{{user.empty}}' }), null, 'empty profile field');
+	assert.strictEqual(await by({ channel: '@{{user.nothere}}' }), null, 'unset profile field');
+	assert.strictEqual(await by({ channel: '@{{displayname}}' }, { ...forumUser, displayname: '' }), null, 'display name not unique');
+	assert.ok(await by({ channel: '@{{user.mattermost}}', text: '{{excerpt}}' }), 'an empty message field does not matter');
+	assert.match(Webhook.explainUnmatched({ ...cfg, body: '{"channel": "@{{user.empty}}"}' }, forumUser), /no value for \{\{user\.empty\}\}/);
+	assert.strictEqual(Webhook.explainUnmatched(cfg, forumUser), '');
+});
+
+test('configured() rejects unknown placeholders and filters, and secret fields', () => {
+	const with_ = body => Webhook.configured({ ...cfg, body: JSON.stringify(body) });
+	assert.match(with_({ channel: '@{{usrname}}' }), /Unknown placeholder \{\{usrname\}\}/);
+	assert.match(with_({ channel: '@{{email|nope}}' }), /Unknown filter "\|nope"/);
+	assert.match(with_({ channel: '@{{user.password}}' }), /not allowed/);
+	assert.match(with_({ channel: '@{{user.rss_token}}' }), /not allowed/);
+});
+
+test('a job queued with a bare username (older version) still sends', async () => {
+	await Webhook.send(cfg, 'alice', message);
+	assert.strictEqual(hook.requests[0].body.channel, '@alice');
 });
 
 test('verify checks the settings without sending anything', async () => {
@@ -199,4 +246,32 @@ test('relay: a pushed reply notification reaches the webhook as a DM to the user
 	assert.strictEqual(body.channel, '@alice');
 	assert.match(body.text, /\[Printer on fire\]\(https:\/\/forum\.example\.com\/post\/100\)/);
 	assert.match(body.text, /^> Have you tried turning it off\?$/m);
+});
+
+test('relay: {{user.<field>}} reads a custom profile field; users without it are unmatched; secrets are never fetched', async () => {
+	hook.requests.length = 0;
+	Object.assign(state.settings, { webhook_body: '{"channel": "@{{user.chat_handle}}", "text": "{{text}}"}' });
+	Settings.invalidate();
+	Identity.clear();
+	Relay.clearDedupe();
+	state.users[1] = { uid: 1, username: 'Alice', chat_handle: 'a.cohen', password: 'hash!' };
+	state.users[3] = { uid: 3, username: 'carol' };
+	const fields = [];
+	const user = require('./stub').modules['./src/user'];
+	const orig = user.getUserFields;
+	user.getUserFields = async (uid, f) => { fields.push(...f); return orig(uid, f); };
+	try {
+		const result = await Relay.handle({
+			notification: { type: 'mention', nid: `mention:${Date.now()}`, datetime: Date.now(), bodyShort: 'hi', path: '/topic/10', tid: 10 },
+			uidsNotified: [1, 3],
+		});
+		assert.strictEqual(result.sent, 1, JSON.stringify(result));
+		assert.strictEqual(result.unmatched, 1);
+		assert.strictEqual(hook.requests[0].body.channel, '@a.cohen');
+		assert.ok(fields.includes('chat_handle'));
+		assert.deepStrictEqual(Webhook.userFields({ body: '{"a": "{{user.password}}"}' }).fields, ['password']);
+		assert.strictEqual((await Identity.forumUser(1, { fields: ['password', 'chat_handle'] })).fields.password, undefined);
+	} finally {
+		user.getUserFields = orig;
+	}
 });

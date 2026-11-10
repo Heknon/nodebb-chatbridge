@@ -66,14 +66,39 @@ line, or a JSON object). The body is a JSON template; the default sends a DM:
 {"channel": "@{{username}}", "text": "{{text}}"}
 ```
 
+Who it goes to. The recipient doesn't have to be the forum username:
+
 | Placeholder | Value |
 | --- | --- |
 | `{{username}}` | Forum username, lowercased |
+| `{{uid}}`, `{{userslug}}` | Forum user id, URL slug |
+| `{{email}}` | Verified email only |
+| `{{fullname}}` | Full name |
+| `{{displayname}}` | Full name, only if no other forum user has the same one |
+| `{{user.<field>}}` | Any field of the NodeBB user record, e.g. a custom profile field: `{{user.chat_handle}}`. Passwords and tokens are never sent |
+
+What it says:
+
+| Placeholder | Value |
+| --- | --- |
 | `{{text}}` | The whole message as markdown: summary, link to the post, quoted excerpt |
 | `{{summary}}` | The one-line summary, markdown |
 | `{{plain}}` | The summary as plain text, then the link |
 | `{{title}}`, `{{url}}`, `{{excerpt}}` | Topic title, link, reply excerpt (plain text) |
 | `{{event}}`, `{{stage}}`, `{{color}}` | Event key, Shotef stage, hex accent |
+
+Filters chain after a `|`: `localpart` (before the `@`), `domain` (after it),
+`lower`, `upper`, `trim`. For example, when chat usernames are the email's
+local part:
+
+```json
+{"channel": "@{{email|localpart}}", "text": "{{text}}"}
+```
+
+If a recipient placeholder the body uses is empty for a user (no verified
+email, a profile field they haven't filled in), that user is unmatched and
+nothing is sent. "Send me a test message" says which value is missing. An
+unknown placeholder or filter is a settings error.
 
 Placeholders are filled in after the template is parsed, inside its strings,
 so quotes or newlines in forum text can't break the JSON. Any JSON shape works,
@@ -105,7 +130,9 @@ A provider is one file in `lib/providers/` that exports:
 | --- | --- |
 | `id`, `label` | `id` prefixes its settings (`<id>_url`, …) |
 | `fields` | ACP inputs: `{ key, label, type, help, required, default }`; `type` is `text`, `password`, `url` or `textarea` |
-| `lookup` | Optional. `false` hides "Match forum users by" (the provider maps the username itself) |
+| `lookup` | Optional. `false` hides "Match forum users by" (the provider maps the user itself) |
+| `userFields(cfg)` | Optional. `{ displayname, fields }`: more of the forum user to pass to `findUser` (`fields` lands in `user.fields`) |
+| `explainUnmatched(cfg, user)` | Optional. Why a user is unmatched, for the ACP test message |
 | `verify(cfg)` | Check the credentials, return `{ name }` |
 | `findUser(cfg, { username, email, displayname }, strategy)` | The chat user id, or `null`. `strategy` lists `username`, `email`, `displayname` to try in order |
 | `send(cfg, userId, message)` | Deliver it. Throw `RetryableError` or `PermanentError` (`lib/errors.js`) |
