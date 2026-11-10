@@ -47,7 +47,7 @@ const setBridge = values => emit('admin', 'admin.settings.set', { hash: 'chatbri
 const S = {};
 async function sessions() {
 	S.admin = await new Session().login('admin', 'Admin-pass-123!');
-	for (const u of ['alice', 'Bob', 'dave.forum', 'nobody', 'gone']) {
+	for (const u of ['alice', 'Bob', 'dave.forum', 'nobody', 'gone', 'eve']) {
 		// eslint-disable-next-line no-await-in-loop
 		S[u] = await new Session().login(u, PW);
 	}
@@ -110,6 +110,7 @@ const ctx = {};
 	// Every run starts from the plugin's defaults, whatever a previous run left behind.
 	await setBridge({
 		mattermost_enabled: 'on', mattermost_url: 'http://mattermost:8065', mattermost_token: env.BOT_TOKEN, mattermost_match: 'username',
+		webhook_enabled: 'off', webhook_url: '', webhook_headers: 'Content-Type: application/json', webhook_body: '{"channel": "@{{username}}", "text": "{{text}}"}',
 		baseUrl: '', excerptLength: '300',
 		event_reply: 'on', event_ticket_status: 'on', event_ticket_team: 'on', event_mention: 'on', event_topic: 'off', event_other: 'off',
 	});
@@ -152,13 +153,13 @@ const ctx = {};
 	});
 	await check('ACP: Test connection names the bot', async () => {
 		const page = await acp();
-		await page.click('.chatbridge-verify');
+		await page.click('.chatbridge-verify[data-provider="mattermost"]');
 		assert.strictEqual(await acpResult(page), 'Connected as forumbot (bot)');
 	});
 	await check('ACP: Send me a test message reaches the admin\'s chat account', async () => {
 		const page = await acp();
 		const n0 = await count('admin');
-		await page.click('.chatbridge-test-message');
+		await page.click('.chatbridge-test-message[data-provider="mattermost"]');
 		assert.strictEqual(await acpResult(page), 'Sent. Check your direct messages.');
 		const a = att(await nextDm('admin', n0));
 		assert.match(a.pretext, /^Test message from the forum's \*\*Chat Bridge\*\*/);
@@ -633,6 +634,139 @@ const ctx = {};
 		assert.ok(r.overflow <= 0, `the log table overflows by ${r.overflow}px`);
 		assert.ok(r.err.right <= r.box.right + 1 && r.err.width > 150, `the error is squeezed or clipped: ${JSON.stringify(r)}`);
 	});
+
+	// --------------------------------------------------------------- webhook
+	// The token-less provider: a Mattermost incoming webhook, "@username" DMs.
+	// Its posts arrive from the webhook's owner (mmadmin), marked from_webhook.
+	const HOOK = `http://mattermost:8065/hooks/${env.HOOK_ID}`;
+	const hookDms = u => dms(u, env.ADMIN_ID);
+	const nextHookDm = async (u, before, timeout = 15000) => waitFor(async () => {
+		const p = await hookDms(u);
+		return p.length > before ? p[p.length - 1] : null;
+	}, { timeout, what: `a webhook DM to ${u}` });
+	await check('webhook: the ACP shows the webhook card with the default headers and body', async () => {
+		await setBridge({ mattermost_enabled: 'off', webhook_enabled: 'on', webhook_url: HOOK });
+		const page = await acp();
+		const form = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('.chatbridge-settings [name^="webhook_"]')]
+			.map(el => [el.name, el.type === 'checkbox' ? el.checked : el.value])));
+		assert.deepStrictEqual(form, {
+			webhook_enabled: true,
+			webhook_url: HOOK,
+			webhook_headers: 'Content-Type: application/json',
+			webhook_body: '{"channel": "@{{username}}", "text": "{{text}}"}',
+		});
+		const tags = await page.evaluate(() => ['webhook_headers', 'webhook_body'].map(n => document.querySelector(`[name="${n}"]`).tagName));
+		assert.deepStrictEqual(tags, ['TEXTAREA', 'TEXTAREA']);
+	});
+	await check('webhook: Test connection checks the settings; Send me a test message arrives', async () => {
+		const page = await acp();
+		const result = () => page.waitForFunction(() => {
+			const t = document.querySelector('.chatbridge-result[data-provider="webhook"]').textContent;
+			return t && !/…$/.test(t) && t;
+		}, null, { timeout: 20000 }).then(h => h.jsonValue());
+		await page.click('.chatbridge-verify[data-provider="webhook"]');
+		assert.match(await result(), /^Settings look valid\. Messages go to mattermost:8065/);
+		const n0 = (await hookDms('admin')).length;
+		await page.click('.chatbridge-test-message[data-provider="webhook"]');
+		assert.strictEqual(await result(), 'Sent. Check your direct messages.');
+		const p = await nextHookDm('admin', n0);
+		assert.match(p.message, /^Test message from the forum's \*\*Chat Bridge\*\*/);
+	});
+	await check('webhook: a reply reaches the author as a markdown DM', async () => {
+		const t = await topic('alice', 'Webhook *printer* jam #2', 'Paper everywhere.');
+		const a0 = (await hookDms('alice')).length;
+		const r = await reply('Bob', t.tid, 'Open tray 2, then "pull" gently.\n\nLine two {"not": "json"}');
+		const p = await nextHookDm('alice', a0);
+		assert.strictEqual(p.message, [
+			'**Bob** posted a reply in **Webhook \\*printer\\* jam \\#2**',
+			`[Webhook \\*printer\\* jam \\#2](http://localhost:4567/post/${r.pid})`,
+			'> Open tray 2, then "pull" gently. Line two {"not": "json"}',
+		].join('\n'));
+		const { entries } = await bridgeLog();
+		const e = entries.find(x => x.url === `http://localhost:4567/post/${r.pid}`);
+		assert.deepStrictEqual([e.outcome, e.provider], ['sent', 'webhook']);
+		return p.message;
+	});
+	await check('webhook: a mention reaches forum "Bob" as Mattermost "@bob"', async () => {
+		const b0 = (await hookDms('bob')).length;
+		await topic('alice', 'Webhook mention', 'Ping @Bob please');
+		const p = await nextHookDm('bob', b0);
+		assert.match(p.message, /mentioned you in/);
+	});
+	await check('webhook: a custom body template (attachment, override username)', async () => {
+		await setBridge({
+			webhook_body: JSON.stringify({
+				channel: '@{{username}}',
+				username: 'Forum',
+				attachments: [{ fallback: '{{plain}}', color: '{{color}}', pretext: '{{summary}}', title: '{{title}}', title_link: '{{url}}', text: '{{excerpt}}' }],
+			}),
+		});
+		try {
+			const t = await topic('alice', 'Webhook template', 'x');
+			const a0 = (await hookDms('alice')).length;
+			const r = await reply('Bob', t.tid, 'Templated');
+			const a = (await nextHookDm('alice', a0)).props.attachments[0];
+			assert.deepStrictEqual([a.pretext, a.title, a.title_link, a.text, a.color],
+				['**Bob** posted a reply in **Webhook template**', 'Webhook template', `http://localhost:4567/post/${r.pid}`, 'Templated', '#1e88e5']);
+		} finally {
+			await setBridge({ webhook_body: '{"channel": "@{{username}}", "text": "{{text}}"}' });
+		}
+	});
+	await check('webhook: a forum user with no chat account is logged as failed, not retried', async () => {
+		const t = await topic('nobody', 'Webhook to nobody', 'x');
+		const r = await reply('Bob', t.tid, 'You are not in chat');
+		const e = await waitFor(async () => (await bridgeLog()).entries.find(x => x.url === `http://localhost:4567/post/${r.pid}`), { what: 'a log entry' });
+		assert.deepStrictEqual([e.outcome, e.provider], ['failed', 'webhook']);
+		assert.match(e.error, /400/);
+		assert.strictEqual((await bridgeLog()).pending, 0);
+	});
+	await check('webhook: {{email|localpart}} reaches a chat user whose name is not the forum username', async () => {
+		// dave.forum's verified email is dave.mm@corp.example; Mattermost has dave.mm. eve's email is unconfirmed.
+		await setBridge({ webhook_body: '{"channel": "@{{email|localpart}}", "text": "{{text}}"}' });
+		try {
+			const d0 = (await hookDms('dave.mm')).length;
+			const t = await topic('dave.forum', 'Webhook by email', 'x');
+			const r = await reply('Bob', t.tid, 'Found you by email');
+			const p = await nextHookDm('dave.mm', d0);
+			assert.match(p.message, /Found you by email/);
+			const t2 = await topic('eve', 'Webhook unconfirmed', 'x');
+			const r2 = await reply('Bob', t2.tid, 'No verified email');
+			await sleep(4000);
+			assert.ok(!(await bridgeLog()).entries.some(x => x.url === `http://localhost:4567/post/${r2.pid}`), 'sent to eve, whose email is unconfirmed');
+			return { dave: r.pid };
+		} finally {
+			await setBridge({ webhook_body: '{"channel": "@{{username}}", "text": "{{text}}"}' });
+		}
+	});
+	await check('webhook: {{user.<field>}} reads a field of the NodeBB user record (a custom profile field)', async () => {
+		execSync(`docker exec chatbridge-e2e-redis redis-cli HSET user:${seed.users['dave.forum']} chat_handle dave.mm`);
+		await setBridge({ webhook_body: '{"channel": "@{{user.chat_handle}}", "text": "{{text}}"}' });
+		try {
+			const d0 = (await hookDms('dave.mm')).length;
+			const t = await topic('dave.forum', 'Webhook by profile field', 'x');
+			await reply('Bob', t.tid, 'Found you by profile field');
+			assert.match((await nextHookDm('dave.mm', d0)).message, /Found you by profile field/);
+			// alice has no chat_handle: unmatched, nothing sent.
+			const a0 = (await hookDms('alice')).length;
+			const t2 = await topic('alice', 'Webhook no handle', 'x');
+			const r2 = await reply('Bob', t2.tid, 'You have no handle');
+			await sleep(4000);
+			assert.strictEqual((await hookDms('alice')).length, a0, 'alice has no chat_handle but got a DM');
+			assert.ok(!(await bridgeLog()).entries.some(x => x.url === `http://localhost:4567/post/${r2.pid}`));
+		} finally {
+			await setBridge({ webhook_body: '{"channel": "@{{username}}", "text": "{{text}}"}' });
+		}
+	});
+	await check('webhook: the ACP test message explains an unmatched admin', async () => {
+		await setBridge({ webhook_body: '{"channel": "@{{user.chat_handle}}", "text": "{{text}}"}' });
+		try {
+			const r = await ok(await S.admin.v3('POST', '/plugins/chatbridge/providers/webhook/test-message'), 'test message');
+			assert.deepStrictEqual(r, { ok: false, error: 'Your forum account has no value for {{user.chat_handle}}, which the webhook body uses.' });
+		} finally {
+			await setBridge({ webhook_body: '{"channel": "@{{username}}", "text": "{{text}}"}' });
+		}
+	});
+	await setBridge({ mattermost_enabled: 'on', webhook_enabled: 'off' });
 
 	const passed = results.filter(r => r.ok && !r.skipped).length;
 	const skipped = results.filter(r => r.skipped).length;

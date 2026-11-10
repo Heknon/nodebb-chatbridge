@@ -42,12 +42,21 @@
 				</div>
 				<div class="row mt-3">
 					{{{ each ./fields }}}
+					{{{ if ./textarea }}}
+					<div class="col-12 mb-2">
+						<label class="form-label" for="{./name}">{./label}</label>
+						<textarea class="form-control font-monospace" rows="3" id="{./name}" name="{./name}" placeholder="{./placeholder}" spellcheck="false"></textarea>
+						{{{ if ./help }}}<div class="form-text">{./help}</div>{{{ end }}}
+					</div>
+					{{{ else }}}
 					<div class="col-sm-6 mb-2">
 						<label class="form-label" for="{./name}">{./label}</label>
 						<input class="form-control" type="{./type}" id="{./name}" name="{./name}" placeholder="{./placeholder}" autocomplete="off">
 						{{{ if ./help }}}<div class="form-text">{./help}</div>{{{ end }}}
 					</div>
 					{{{ end }}}
+					{{{ end }}}
+					{{{ if ./lookup }}}
 					<div class="col-sm-6 mb-2">
 						<label class="form-label" for="{./matchName}">Match forum users by</label>
 						<select class="form-select" id="{./matchName}" name="{./matchName}">
@@ -57,6 +66,7 @@
 						</select>
 						<div class="form-text">Display name: the forum user's full name must equal the full name or nickname of exactly one chat user. Names shared by two people match nobody.</div>
 					</div>
+					{{{ end }}}
 				</div>
 				<div class="d-flex gap-2 align-items-center mt-2">
 					<button type="button" class="btn btn-outline-secondary btn-sm chatbridge-verify" data-provider="{./id}">Test connection</button>
