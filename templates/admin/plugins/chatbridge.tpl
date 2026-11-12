@@ -45,8 +45,17 @@
 					{{{ if ./textarea }}}
 					<div class="col-12 mb-2">
 						<label class="form-label" for="{./name}">{./label}</label>
-						<textarea class="form-control font-monospace" rows="3" id="{./name}" name="{./name}" placeholder="{./placeholder}" spellcheck="false"></textarea>
+						<div class="position-relative">
+							<textarea class="form-control font-monospace" rows="3" id="{./name}" name="{./name}" placeholder="{./placeholder}" spellcheck="false" autocomplete="off" {{{ if ./placeholders }}}data-placeholders="{./provider}"{{{ end }}}></textarea>
+						</div>
 						{{{ if ./help }}}<div class="form-text">{./help}</div>{{{ end }}}
+						{{{ if ./placeholders }}}
+						<div class="chatbridge-chips mt-2" data-for="{./name}"></div>
+						<div class="chatbridge-preview mt-2" data-for="{./name}" data-provider="{./provider}">
+							<div class="small fw-semibold text-muted mb-1">Preview: what a reply notification to you would send <span class="chatbridge-preview-note fw-normal"></span></div>
+							<pre class="small border rounded p-2 mb-0 bg-body-tertiary text-break chatbridge-preview-out" style="max-height: 22rem; overflow: auto; white-space: pre-wrap;"></pre>
+						</div>
+						{{{ end }}}
 					</div>
 					{{{ else }}}
 					<div class="col-sm-6 mb-2">

@@ -47,7 +47,8 @@ the users' DM channels with the bot).
   ACP card and its buttons; markdown text; a custom body template; a user with
   no chat account is logged as failed; `{{email|localpart}}` and
   `{{user.<field>}}` reach a chat user whose name isn't the forum username, and
-  users without that value get nothing.
+  users without that value get nothing; the body editor's autocomplete,
+  placeholder buttons and live preview.
 - **Failures**: a bad token (logged as failed), Mattermost down (queued, then
   delivered by the retry drain), the provider disabled while a retry waits
   (dropped), and Mattermost down right after a NodeBB restart, before any user

@@ -20,6 +20,11 @@ const l = k => { if (!state.lists.has(k)) state.lists.set(k, []); return state.l
 
 const db = {
 	async getObject(k) { return state.hashes.has(k) ? { ...state.hashes.get(k) } : null; },
+	async getObjects(keys) { return keys.map(k => (state.hashes.has(k) ? { ...state.hashes.get(k) } : null)); },
+	async getSortedSetRange(k, start, stop) {
+		const all = [...z(k).entries()].sort((a, b) => a[1] - b[1]).map(e => e[0]);
+		return all.slice(start, stop < 0 ? undefined : stop + 1);
+	},
 	async setObject(k, o) { state.hashes.set(k, { ...(state.hashes.get(k) || {}), ...o }); },
 	async delete(k) { state.hashes.delete(k); state.zsets.delete(k); state.lists.delete(k); },
 	async sortedSetAdd(k, score, m) { z(k).set(String(m), score); },

@@ -66,6 +66,14 @@ line, or a JSON object). The body is a JSON template; the default sends a DM:
 {"channel": "@{{username}}", "text": "{{text}}"}
 ```
 
+In the ACP, type `{{` in the body field for a list of placeholders (and `|`
+inside one for filters): arrow keys and Enter or Tab pick one, Esc closes it,
+Ctrl+Space opens it. Below the field, every placeholder is a button that
+inserts it at the cursor, the forum's custom profile fields included. Under
+those, a live preview shows the request a reply notification to you would
+make, from the unsaved form, and warns when your own account would get
+nothing. The preview sends nothing.
+
 Who it goes to. The recipient doesn't have to be the forum username:
 
 | Placeholder | Value |
@@ -133,6 +141,8 @@ A provider is one file in `lib/providers/` that exports:
 | `lookup` | Optional. `false` hides "Match forum users by" (the provider maps the user itself) |
 | `userFields(cfg)` | Optional. `{ displayname, fields }`: more of the forum user to pass to `findUser` (`fields` lands in `user.fields`) |
 | `explainUnmatched(cfg, user)` | Optional. Why a user is unmatched, for the ACP test message |
+| `templateHelp()` | Optional. `{ placeholders: [{ name, group, help }], filters: [{ name, help }], userFields }` for the ACP autocomplete; fields with `placeholders: true` get it |
+| `preview(cfg, user, message)` | Optional. `{ headers, body, missing }` or `{ error }`, for the ACP live preview. Must not send |
 | `verify(cfg)` | Check the credentials, return `{ name }` |
 | `findUser(cfg, { username, email, displayname }, strategy)` | The chat user id, or `null`. `strategy` lists `username`, `email`, `displayname` to try in order |
 | `send(cfg, userId, message)` | Deliver it. Throw `RetryableError` or `PermanentError` (`lib/errors.js`) |

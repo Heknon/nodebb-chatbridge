@@ -766,6 +766,44 @@ const ctx = {};
 			await setBridge({ webhook_body: '{"channel": "@{{username}}", "text": "{{text}}"}' });
 		}
 	});
+	await check('webhook: the body editor autocompletes placeholders and filters, and previews what would be sent', async () => {
+		// A NodeBB custom profile field, so it shows up as {{user.chat_handle}}.
+		execSync('docker exec chatbridge-e2e-redis redis-cli ZADD user-custom-fields 0 chat_handle');
+		execSync('docker exec chatbridge-e2e-redis redis-cli HSET user-custom-field:chat_handle key chat_handle name "Chat handle" type input-text');
+		const page = await acp();
+		const out = () => page.locator('.chatbridge-preview[data-provider="webhook"] .chatbridge-preview-out').textContent();
+		await page.waitForFunction(() => /"channel": "@admin"/.test(document.querySelector('.chatbridge-preview-out').textContent));
+		const ta = page.locator('textarea[name="webhook_body"]');
+		const menu = () => page.$$eval('.chatbridge-ac.show .dropdown-item code', els => els.map(e => e.textContent));
+		await ta.fill('');
+		await ta.type('{"channel": "@{{em');
+		await page.waitForSelector('.chatbridge-ac.show');
+		assert.deepStrictEqual(await menu(), ['email']);
+		await ta.press('Enter');
+		assert.strictEqual(await ta.inputValue(), '{"channel": "@{{email}}');
+		await ta.press('ArrowLeft');
+		await ta.press('ArrowLeft');
+		await ta.type('|loc');
+		assert.deepStrictEqual(await menu(), ['|localpart']);
+		await ta.press('Tab');
+		await ta.press('End');
+		await ta.type('", "text": "{{text}}"}');
+		assert.strictEqual(await ta.inputValue(), '{"channel": "@{{email|localpart}}", "text": "{{text}}"}');
+		await page.waitForFunction(() => /"channel": "@admin"/.test(document.querySelector('.chatbridge-preview-out').textContent)
+			&& /localpart/.test(document.querySelector('textarea[name="webhook_body"]').value));
+		assert.match(await out(), /^POST http:\/\/mattermost:8065\/hooks\/\S+\nContent-Type: application\/json\n\n\{\n {2}"channel": "@admin"/);
+		// A chip inserts at the caret; the preview warns that the admin has no chat_handle.
+		await ta.fill('{"channel": "@", "text": "{{text}}"}');
+		await ta.evaluate(t => t.setSelectionRange(14, 14));
+		await page.click('.chatbridge-chips button[data-token="{{user.chat_handle}}"]');
+		assert.strictEqual(await ta.inputValue(), '{"channel": "@{{user.chat_handle}}", "text": "{{text}}"}');
+		await page.waitForFunction(() => /no value for \{\{user\.chat_handle\}\}/.test(document.querySelector('.chatbridge-preview-note').textContent));
+		await ta.fill('{"channel": "@{{usrname}}"}');
+		await page.waitForFunction(() => /Unknown placeholder \{\{usrname\}\}/.test(document.querySelector('.chatbridge-preview-out').textContent));
+		// Nothing was saved: the stored body is unchanged.
+		const saved = await ok(await S.admin.v3('POST', '/plugins/chatbridge/providers/webhook/preview', {}), 'preview');
+		assert.strictEqual(saved.body.channel, '@admin');
+	});
 	await setBridge({ mattermost_enabled: 'on', webhook_enabled: 'off' });
 
 	const passed = results.filter(r => r.ok && !r.skipped).length;

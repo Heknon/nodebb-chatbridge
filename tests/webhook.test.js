@@ -275,3 +275,54 @@ test('relay: {{user.<field>}} reads a custom profile field; users without it are
 		user.getUserFields = orig;
 	}
 });
+
+test('ACP: the placeholder list includes the forum\'s custom profile fields; the page gets it', async () => {
+	const Controllers = require('../lib/controllers');
+	const db = require('./stub').modules['./src/database'];
+	await db.sortedSetAdd('user-custom-fields', 0, 'chat_handle');
+	await db.setObject('user-custom-field:chat_handle', { key: 'chat_handle', name: 'Chat handle', type: 'input-text' });
+	const help = await Controllers.templateHelp(Webhook);
+	const names = help.placeholders.map(p => p.name);
+	assert.ok(['username', 'email', 'text', 'user.chat_handle', 'user.location'].every(n => names.includes(n)), names.join());
+	assert.strictEqual(help.placeholders.find(p => p.name === 'user.chat_handle').help, 'Custom field "Chat handle"');
+	assert.deepStrictEqual(help.filters.map(f => f.name), ['localpart', 'domain', 'lower', 'upper', 'trim']);
+	// Every listed placeholder and filter is one the template accepts.
+	help.placeholders.forEach(p => assert.strictEqual(Webhook.checkPlaceholders(`{"a": "{{${p.name}}}"}`), '', p.name));
+	help.filters.forEach(f => assert.strictEqual(Webhook.checkPlaceholders(`{"a": "{{email|${f.name}}}"}`), '', f.name));
+
+	const res = { render(tpl, data) { this.data = data; } };
+	await Controllers.renderAdmin({}, res);
+	assert.ok(res.data.templateHelp.webhook.placeholders.some(p => p.name === 'user.chat_handle'));
+	const body = res.data.providers.find(p => p.id === 'webhook').fields.find(f => f.name === 'webhook_body');
+	assert.deepStrictEqual([body.textarea, body.placeholders, body.provider], [true, true, 'webhook']);
+});
+
+test('ACP preview: renders the unsaved form for the admin, flags missing values, reports errors, admins only', async () => {
+	const Controllers = require('../lib/controllers');
+	state.users[9] = { uid: 9, username: 'Root', email: 'root.admin@corp', 'email:confirmed': 1, admin: true };
+	state.users[10] = { uid: 10, username: 'pleb' };
+	const call = async (uid, values) => {
+		const res = {};
+		await Controllers.preview({ uid, params: { provider: 'webhook' }, body: { values } }, res);
+		return res.payload;
+	};
+	const before = hook.requests.length;
+	let r = await call(9, { webhook_body: '{"channel": "@{{email|localpart}}", "text": "{{text}}"}', other_key: 'ignored' });
+	assert.strictEqual(r.ok, true, JSON.stringify(r));
+	assert.strictEqual(r.body.channel, '@root.admin');
+	assert.match(r.body.text, /^\*\*Bob\*\* posted a reply in \*\*Printer on fire\*\*\n\[Printer on fire\]\(https:\/\/forum\.example\.com\/post\/123\)\n> Have you tried/);
+	assert.deepStrictEqual(r.headers, { 'Content-Type': 'application/json' });
+	assert.deepStrictEqual(r.missing, []);
+
+	r = await call(9, { webhook_body: '{"channel": "@{{user.chat_handle}}"}' });
+	assert.deepStrictEqual([r.ok, r.body.channel, r.missing], [true, '@', ['{{user.chat_handle}}']]);
+
+	r = await call(9, { webhook_body: '{"channel": "@{{usrname}}"}' });
+	assert.deepStrictEqual(r, { ok: false, error: 'Unknown placeholder {{usrname}}' });
+	r = await call(9, { webhook_body: '{"channel": ' });
+	assert.strictEqual(r.ok, false);
+	assert.match(r.error, /not valid JSON/);
+	assert.strictEqual(hook.requests.length, before, 'a preview sends nothing');
+
+	await assert.rejects(call(10, {}), err => err.status === 403);
+});
